@@ -187,7 +187,7 @@ fs.createReadStream(path.join(__dirname, 'studentList2.csv'))
       
       // For single course, we maintain the original slot pattern (every other column)
       // Starting with column 0, then skipping one, then column 2, etc.
-      for (let col = 1; col < columns; col += 2) {
+      for (let col = 0; col < columns; col += 2) {
         for (let row = 0; row < rows; row++) {
           if (queues[courseName] && queues[courseName].length > 0) {
             seating[row][col] = queues[courseName].shift();
