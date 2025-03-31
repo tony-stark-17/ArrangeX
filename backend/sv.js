@@ -25,14 +25,6 @@ const classroomConfigs = [
   { columns: 6, rows: 5, name: "CS13" },
   { columns: 6, rows: 5, name: "CS14" },
   { columns: 6, rows: 5, name: "CS15" },
-  { columns: 6, rows: 5, name: "CS16" },
-  { columns: 6, rows: 5, name: "CS17" },
-  { columns: 6, rows: 5, name: "CS18" },
-  { columns: 6, rows: 5, name: "CS19" },
-  { columns: 6, rows: 5, name: "CS20" },
-  { columns: 6, rows: 5, name: "CS21" },
-  { columns: 6, rows: 5, name: "CS22" },
-  { columns: 6, rows: 5, name: "CS23" },
 ];
 
 // Column labels for the seating arrangement (used internally)
@@ -153,111 +145,250 @@ fs.createReadStream(path.join(__dirname, 'studentList2.csv'))
     fs.writeFileSync('registration_ranges.html', rangeHTML);
     console.log('Registration ranges generated as registration_ranges.html');
   });
-  function generateClassroom(columns, rows, slots, queues, numCourses) {
-    const seating = Array.from({ length: rows }, () => Array(columns).fill(null));
-    
-    // Check if we're dealing with a single course scenario
-    const isSingleCourse = numCourses === 1;
-    
-    // Also check if we have multiple courses but only one with remaining students
-    let effectivelySingleCourse = false;
-    let singleRemainingCourse = null;
-    
-    if (!isSingleCourse) {
-      // Count how many courses still have students
-      let remainingCoursesCount = 0;
-      let lastCourseWithStudents = null;
-      
-      for (const [course, queue] of Object.entries(queues)) {
-        if (queue.length > 0) {
-          remainingCoursesCount++;
-          lastCourseWithStudents = course;
-        }
-      }
-      
-      if (remainingCoursesCount === 1) {
-        effectivelySingleCourse = true;
-        singleRemainingCourse = lastCourseWithStudents;
-      }
-    }
-    
-    // If we have only one course (initially or after others are depleted)
-    if (isSingleCourse || effectivelySingleCourse) {
-      const courseName = isSingleCourse ? slots[0] : singleRemainingCourse;
-      
-      // For single course, we maintain the original slot pattern (every other column)
-      // Starting with column 0, then skipping one, then column 2, etc.
-      for (let col = 0; col < columns; col += 2) {
-        for (let row = 0; row < rows; row++) {
-          if (queues[courseName] && queues[courseName].length > 0) {
-            seating[row][col] = queues[courseName].shift();
-          }
-        }
-      }
-    } else {
-      // Original logic for multiple courses
-      for (let col = 0; col < columns; col++) {
-        const slotIndex = col % slots.length;
-        const slotCourses = slots[slotIndex];
-        let courseIndex = 0;
+
+// Replace the generateClassroom function with this improved version
+function generateClassroom(columns, rows, slots, queues, numCourses) {
+  const seating = Array.from({ length: rows }, () => Array(columns).fill(null));
   
-        for (let row = 0; row < rows; row++) {
-          let student = null;
-          let attempts = 0;
-          
-          // Try to assign a student from one of the courses in this slot
-          while (attempts < slotCourses.length && !student) {
-            const course = slotCourses[courseIndex % slotCourses.length];
-            if (course && queues[course] && queues[course].length > 0) {
-              student = queues[course].shift();
-              seating[row][col] = student;
-            } else {
-              courseIndex++;
-              attempts++;
-            }
-          }
-        }
-      }
-  
-      // Check if we have only one course with students remaining after this assignment
-      // This handles the transition to single-course mode mid-classroom
-      let remainingCourses = 0;
-      let remainingCourseName = null;
-      
-      for (const [course, queue] of Object.entries(queues)) {
-        if (queue.length > 0) {
-          remainingCourses++;
-          remainingCourseName = course;
-        }
-      }
-      
-      // If only one course remains with students, use the alternating pattern for remaining seats
-      if (remainingCourses === 1) {
-        const remainingSeats = [];
-        
-        // Find empty seats in even-numbered columns only (0, 2, 4)
-        for (let row = 0; row < rows; row++) {
-          for (let col = 0; col < columns; col += 2) {
-            if (seating[row][col] === null) {
-              remainingSeats.push({ row, col });
-            }
-          }
-        }
-        
-        // Sort by column, then row
-        remainingSeats.sort((a, b) => a.col - b.col || a.row - b.row);
-        
-        // Fill remaining seats with alternating pattern
-        for (const seat of remainingSeats) {
-          if (queues[remainingCourseName] && queues[remainingCourseName].length > 0) {
-            seating[seat.row][seat.col] = queues[remainingCourseName].shift();
-          }
-        }
-      }
+  // Count how many courses still have students and which ones they are
+  const activeCourses = [];
+  for (const [course, queue] of Object.entries(queues)) {
+    if (queue.length > 0) {
+      activeCourses.push(course);
     }
-    
-    return { seating };
   }
+  
+  // Check if we're dealing with a single course scenario
+  const isSingleCourse = activeCourses.length === 1;
+  
+  if (isSingleCourse) {
+    // For single course, use a zigzag pattern to maximize distance between students
+    const courseName = activeCourses[0];
+    
+    // Fill even-numbered columns first (0, 2, 4...)
+    for (let col = 0; col < columns; col += 2) {
+      for (let row = 0; row < rows; row++) {
+        if (queues[courseName] && queues[courseName].length > 0) {
+          seating[row][col] = queues[courseName].shift();
+        }
+      }
+    }
+    
+    // Then fill odd-numbered columns (1, 3, 5...)
+    for (let col = 1; col < columns; col += 2) {
+      for (let row = 0; row < rows; row++) {
+        if (queues[courseName] && queues[courseName].length > 0) {
+          seating[row][col] = queues[courseName].shift();
+        }
+      }
+    }
+  } else {
+    // Multiple courses - use a completely different allocation strategy
+    
+    // Create a 2D map to track which course is assigned to each seat
+    const seatCourses = Array.from({ length: rows }, () => Array(columns).fill(null));
+    
+    // Define a function to check if a course can be placed at a specific position
+    const canPlaceCourse = (row, col, course) => {
+      // Check horizontally adjacent seats
+      if (col > 0 && seatCourses[row][col-1] === course) return false;
+      if (col < columns-1 && seatCourses[row][col+1] === course) return false;
+      
+      // Check vertically adjacent seats (optional, less important constraint)
+      // if (row > 0 && seatCourses[row-1][col] === course) return false;
+      // if (row < rows-1 && seatCourses[row+1][col] === course) return false;
+      
+      return true;
+    };
+    
+    // Sort courses by number of students (descending)
+    const sortedCourses = [...activeCourses].sort((a, b) => 
+      queues[b].length - queues[a].length
+    );
+    
+    // First pass: assign courses to columns in a way that avoids adjacency
+    // We'll use a strategy where we alternate columns for different courses
+    
+    // Group columns into odd and even
+    const evenColumns = Array.from({ length: Math.ceil(columns/2) }, (_, i) => i * 2)
+      .filter(col => col < columns);
+    const oddColumns = Array.from({ length: Math.floor(columns/2) }, (_, i) => i * 2 + 1);
+    
+    // Assign major courses to column groups
+    let courseIndex = 0;
+    
+    // Function to fill a set of columns with students from a specific course
+    const fillColumnSet = (columnSet, course) => {
+      if (!queues[course] || queues[course].length === 0) return false;
+      
+      let studentsPlaced = 0;
+      
+      for (const col of columnSet) {
+        for (let row = 0; row < rows; row++) {
+          if (seating[row][col] === null && queues[course].length > 0 && canPlaceCourse(row, col, course)) {
+            seating[row][col] = queues[course].shift();
+            seatCourses[row][col] = course;
+            studentsPlaced++;
+          }
+        }
+      }
+      
+      return studentsPlaced > 0;
+    };
+    
+    // First fill even columns with the course that has the most students
+    if (sortedCourses.length > 0) {
+      fillColumnSet(evenColumns, sortedCourses[0]);
+      courseIndex++;
+    }
+    
+    // Then fill odd columns with the course that has the second most students
+    if (sortedCourses.length > 1) {
+      fillColumnSet(oddColumns, sortedCourses[1]);
+      courseIndex++;
+    }
+    
+    // Then try to assign remaining courses to specific columns
+    // but ensure no course appears in adjacent columns
+    while (courseIndex < sortedCourses.length) {
+      const course = sortedCourses[courseIndex];
+      
+      // Find columns where this course can be placed without adjacency issues
+      const availableColumns = [];
+      for (let col = 0; col < columns; col++) {
+        let canUseColumn = true;
+        
+        // Check if this course is already in adjacent columns
+        if (col > 0) {
+          for (let row = 0; row < rows; row++) {
+            if (seatCourses[row][col-1] === course) {
+              canUseColumn = false;
+              break;
+            }
+          }
+        }
+        
+        if (col < columns-1) {
+          for (let row = 0; row < rows; row++) {
+            if (seatCourses[row][col+1] === course) {
+              canUseColumn = false;
+              break;
+            }
+          }
+        }
+        
+        if (canUseColumn) {
+          availableColumns.push(col);
+        }
+      }
+      
+      // Sort available columns to prefer those with more empty seats
+      availableColumns.sort((a, b) => {
+        const emptySeatsA = seating.filter(row => row[a] === null).length;
+        const emptySeatsB = seating.filter(row => row[b] === null).length;
+        return emptySeatsB - emptySeatsA;
+      });
+      
+      // Try to place students in available columns
+      let studentsPlaced = false;
+      for (const col of availableColumns) {
+        for (let row = 0; row < rows; row++) {
+          if (seating[row][col] === null && queues[course].length > 0 && canPlaceCourse(row, col, course)) {
+            seating[row][col] = queues[course].shift();
+            seatCourses[row][col] = course;
+            studentsPlaced = true;
+          }
+        }
+      }
+      
+      // Move to next course regardless of whether we placed students
+      // This prevents getting stuck on a course with few students
+      courseIndex++;
+      
+      // If we've gone through all courses but still have empty seats and students,
+      // start again from the course with the most remaining students
+      if (courseIndex >= sortedCourses.length) {
+        // Recalculate active courses
+        const remainingCourses = [];
+        for (const [course, queue] of Object.entries(queues)) {
+          if (queue.length > 0) {
+            remainingCourses.push(course);
+          }
+        }
+        
+        if (remainingCourses.length > 0) {
+          // Sort by remaining students
+          remainingCourses.sort((a, b) => queues[b].length - queues[a].length);
+          sortedCourses.length = 0; // Clear the array
+          sortedCourses.push(...remainingCourses);
+          courseIndex = 0;
+          
+          // Check if we've actually placed any students in the last full cycle
+          if (!studentsPlaced) {
+            // If we couldn't place any students with strict adjacency rules,
+            // we need to relax the constraints to fill remaining seats
+            break;
+          }
+        } else {
+          break; // No more students to place
+        }
+      }
+    }
+    
+    // Final pass - fill remaining empty seats, still trying to maintain
+    // separation but with relaxed constraints if necessary
+    let hasEmptySeats = true;
+    while (hasEmptySeats) {
+      hasEmptySeats = false;
+      
+      // Recalculate active courses with remaining students
+      const remainingCourses = Object.entries(queues)
+        .filter(([_, queue]) => queue.length > 0)
+        .map(([course, _]) => course)
+        .sort((a, b) => queues[b].length - queues[a].length);
+      
+      if (remainingCourses.length === 0) break;
+      
+      // Try to place students with the adjacency constraint
+      for (let col = 0; col < columns; col++) {
+        for (let row = 0; row < rows; row++) {
+          if (seating[row][col] === null) {
+            hasEmptySeats = true;
+            
+            // Try each course, prioritizing those with most students
+            let placed = false;
+            for (const course of remainingCourses) {
+              if (queues[course].length > 0 && canPlaceCourse(row, col, course)) {
+                seating[row][col] = queues[course].shift();
+                seatCourses[row][col] = course;
+                placed = true;
+                break;
+              }
+            }
+            
+            // If no course could be placed with adjacency constraint,
+            // just place the course with the most students
+            if (!placed && remainingCourses.length > 0) {
+              const course = remainingCourses[0];
+              if (queues[course].length > 0) {
+                seating[row][col] = queues[course].shift();
+                seatCourses[row][col] = course;
+              }
+            }
+          }
+        }
+      }
+      
+      // If we've gone through all seats but still couldn't place anyone,
+      // we should break to avoid an infinite loop
+      if (hasEmptySeats && remainingCourses.every(course => queues[course].length === 0)) {
+        break;
+      }
+    }
+  }
+  
+  return { seating };
+}
 
 function generateHTML(classrooms) {
   const currentDate = new Date();
