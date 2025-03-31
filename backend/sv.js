@@ -1,0 +1,616 @@
+const csv = require('csv-parser');
+const fs = require('fs');
+const path = require('path');
+
+const classrooms = [];
+
+const classroomConfigs = [
+  { columns: 6, rows: 5, name: "EC5" },
+  { columns: 6, rows: 5, name: "EC6" },
+  { columns: 6, rows: 5, name: "EC7" },
+  { columns: 6, rows: 5, name: "EC8" },
+  { columns: 6, rows: 5, name: "EC9" },
+  { columns: 6, rows: 5, name: "EC10" },
+  { columns: 6, rows: 5, name: "EC11" },
+  { columns: 6, rows: 5, name: "EC12" },
+  { columns: 6, rows: 5, name: "EC13" },
+  { columns: 6, rows: 5, name: "CS5" },
+  { columns: 6, rows: 5, name: "CS6" },
+  { columns: 6, rows: 5, name: "CS7" },
+  { columns: 6, rows: 5, name: "CS8" },
+  { columns: 6, rows: 5, name: "CS9" },
+  { columns: 6, rows: 5, name: "CS10" },
+  { columns: 6, rows: 5, name: "CS11" },
+  { columns: 6, rows: 5, name: "CS12" },
+  { columns: 6, rows: 5, name: "CS13" },
+  { columns: 6, rows: 5, name: "CS14" },
+  { columns: 6, rows: 5, name: "CS15" },
+  { columns: 6, rows: 5, name: "CS16" },
+  { columns: 6, rows: 5, name: "CS17" },
+  { columns: 6, rows: 5, name: "CS18" },
+  { columns: 6, rows: 5, name: "CS19" },
+  { columns: 6, rows: 5, name: "CS20" },
+  { columns: 6, rows: 5, name: "CS21" },
+  { columns: 6, rows: 5, name: "CS22" },
+  { columns: 6, rows: 5, name: "CS23" },
+];
+
+// Column labels for the seating arrangement (used internally)
+const columnLabels = ["AL", "AR", "BL", "BR", "CL", "CR"];
+
+// Read and parse CSV
+const students = [];
+fs.createReadStream(path.join(__dirname, 'studentList2.csv'))
+  .pipe(csv({
+    headers: false,
+    skipLines: 1
+  }))
+  .on('data', (row) => {
+    students.push(row);
+  })
+  .on('end', () => {
+    // Group students by course (7th column, index 7)
+    const groups = {};
+    students.forEach(student => {
+      const course = student[7];
+      if (!groups[course]) {
+        groups[course] = [];
+      }
+      groups[course].push(student);
+    });
+    console.log(Object.keys(groups))
+    const courseNames = Object.keys(groups).sort((a, b) => groups[b].length - groups[a].length);
+    let numCourses = courseNames.length;
+    let slots = [];
+    let numSlots;
+
+    if (numCourses === 1) {
+      // For single course, we'll handle this differently in generateClassroom
+      slots = [courseNames[0]];
+      numSlots = 1;
+    } else {
+      numSlots = Math.ceil(numCourses / 2);
+      for (let i = 0; i < numSlots; i++) {
+        const start = i * 2;
+        const end = start + 2;
+        slots.push(courseNames.slice(start, end));
+      }
+    }
+
+    // Create queues for each course
+    const queues = {};
+    courseNames.forEach(course => {
+      queues[course] = [...groups[course]];
+    });
+
+    // Generate classrooms
+    classroomConfigs.forEach(config => {
+      const classroom = generateClassroom(config.columns, config.rows, slots, queues, numCourses);
+      classroom.name = config.name;
+      
+      // Count students per course in this classroom
+      const courseCounts = {};
+      
+      // Track all students in this classroom with their registration numbers
+      const allStudents = [];
+      
+      for (let row = 0; row < config.rows; row++) {
+        for (let col = 0; col < config.columns; col++) {
+          const student = classroom.seating[row][col];
+          if (student) {
+            const course = student[7];
+            const regNo = student[1];
+            
+            courseCounts[course] = (courseCounts[course] || 0) + 1;
+            allStudents.push({
+              regNo: regNo,
+              course: course
+            });
+          }
+        }
+      }
+      
+      classroom.courseCounts = courseCounts;
+      classroom.allStudents = allStudents;
+      classrooms.push(classroom);
+    });
+      
+    // Check for remaining students
+    let remainingStudents = 0;
+    const tempQueues = {};
+    Object.keys(queues).forEach(course => {
+      tempQueues[course] = [...queues[course]];
+      remainingStudents += tempQueues[course].length;
+    });
+
+    if (remainingStudents > 0) {
+      const lastConfig = classroomConfigs[classroomConfigs.length - 1];
+      let additionalClassrooms = 0;
+
+      while (true) {
+        let allEmpty = true;
+        Object.values(tempQueues).forEach(queue => {
+          if (queue.length > 0) allEmpty = false;
+        });
+        if (allEmpty) break;
+
+        generateClassroom(lastConfig.columns, lastConfig.rows, slots, tempQueues, numCourses);
+        additionalClassrooms++;
+      }
+
+      console.log(`\n⚠️ Insufficient classrooms!`);
+      console.log(`▶ Need ${additionalClassrooms} more classroom(s) of ${lastConfig.columns}x${lastConfig.rows}`);
+      console.log(`   to seat ${remainingStudents} remaining student(s) using current distribution logic.`);
+    }
+
+    // Generate HTML
+    const html = generateHTML(classrooms);
+    fs.writeFileSync('seating_arrangement.html', html);
+    console.log('Seating arrangement generated as seating_arrangement.html');
+
+    // Generate registration range display
+    const rangeHTML = generateRegistrationRangeHTML(classrooms);
+    fs.writeFileSync('registration_ranges.html', rangeHTML);
+    console.log('Registration ranges generated as registration_ranges.html');
+  });
+  function generateClassroom(columns, rows, slots, queues, numCourses) {
+    const seating = Array.from({ length: rows }, () => Array(columns).fill(null));
+    
+    // Check if we're dealing with a single course scenario
+    const isSingleCourse = numCourses === 1;
+    
+    // Also check if we have multiple courses but only one with remaining students
+    let effectivelySingleCourse = false;
+    let singleRemainingCourse = null;
+    
+    if (!isSingleCourse) {
+      // Count how many courses still have students
+      let remainingCoursesCount = 0;
+      let lastCourseWithStudents = null;
+      
+      for (const [course, queue] of Object.entries(queues)) {
+        if (queue.length > 0) {
+          remainingCoursesCount++;
+          lastCourseWithStudents = course;
+        }
+      }
+      
+      if (remainingCoursesCount === 1) {
+        effectivelySingleCourse = true;
+        singleRemainingCourse = lastCourseWithStudents;
+      }
+    }
+    
+    // If we have only one course (initially or after others are depleted)
+    if (isSingleCourse || effectivelySingleCourse) {
+      const courseName = isSingleCourse ? slots[0] : singleRemainingCourse;
+      
+      // For single course, we maintain the original slot pattern (every other column)
+      // Starting with column 0, then skipping one, then column 2, etc.
+      for (let col = 1; col < columns; col += 2) {
+        for (let row = 0; row < rows; row++) {
+          if (queues[courseName] && queues[courseName].length > 0) {
+            seating[row][col] = queues[courseName].shift();
+          }
+        }
+      }
+    } else {
+      // Original logic for multiple courses
+      for (let col = 0; col < columns; col++) {
+        const slotIndex = col % slots.length;
+        const slotCourses = slots[slotIndex];
+        let courseIndex = 0;
+  
+        for (let row = 0; row < rows; row++) {
+          let student = null;
+          let attempts = 0;
+          
+          // Try to assign a student from one of the courses in this slot
+          while (attempts < slotCourses.length && !student) {
+            const course = slotCourses[courseIndex % slotCourses.length];
+            if (course && queues[course] && queues[course].length > 0) {
+              student = queues[course].shift();
+              seating[row][col] = student;
+            } else {
+              courseIndex++;
+              attempts++;
+            }
+          }
+        }
+      }
+  
+      // Check if we have only one course with students remaining after this assignment
+      // This handles the transition to single-course mode mid-classroom
+      let remainingCourses = 0;
+      let remainingCourseName = null;
+      
+      for (const [course, queue] of Object.entries(queues)) {
+        if (queue.length > 0) {
+          remainingCourses++;
+          remainingCourseName = course;
+        }
+      }
+      
+      // If only one course remains with students, use the alternating pattern for remaining seats
+      if (remainingCourses === 1) {
+        const remainingSeats = [];
+        
+        // Find empty seats in even-numbered columns only (0, 2, 4)
+        for (let row = 0; row < rows; row++) {
+          for (let col = 0; col < columns; col += 2) {
+            if (seating[row][col] === null) {
+              remainingSeats.push({ row, col });
+            }
+          }
+        }
+        
+        // Sort by column, then row
+        remainingSeats.sort((a, b) => a.col - b.col || a.row - b.row);
+        
+        // Fill remaining seats with alternating pattern
+        for (const seat of remainingSeats) {
+          if (queues[remainingCourseName] && queues[remainingCourseName].length > 0) {
+            seating[seat.row][seat.col] = queues[remainingCourseName].shift();
+          }
+        }
+      }
+    }
+    
+    return { seating };
+  }
+
+function generateHTML(classrooms) {
+  const currentDate = new Date();
+  const formattedDate = `${currentDate.getDate()}.${currentDate.getMonth() + 1}.${currentDate.getFullYear()} F.N`;
+  
+  let html = `<!DOCTYPE html>
+  <html>
+  <head>
+    <style>
+      body { 
+        font-family: Arial, sans-serif; 
+        margin: 0;
+        padding: 0;
+      }
+      .classroom-container {
+        page-break-after: always; /* Forces a page break after each classroom */
+        padding: 10px;
+        width: 100%;
+        box-sizing: border-box;
+      }
+      .classroom-container:last-child {
+        page-break-after: auto;
+      }
+      table { 
+        border-collapse: collapse; 
+        width: 100%; 
+        margin-bottom: 20px; 
+        page-break-inside: avoid; 
+        table-layout: fixed; /* Ensures equal column widths */
+        font-size: 10px; /* Smaller font size to fit everything */
+      }
+      th, td { 
+        border: 1px solid black; 
+        padding: 4px; /* Reduced padding */
+        text-align: center; 
+        overflow: hidden;
+        white-space: nowrap;
+        text-overflow: ellipsis; /* Shows ellipsis for long text */
+      }
+      th { 
+        background-color: #f2f2f2; 
+        font-weight: bold;
+      }
+      .exam-header {
+        background-color: #e6e6e6;
+        font-weight: bold;
+      }
+      .classroom-name {
+        font-size: 14px;
+        font-weight: bold;
+        background-color: #d9d9d9;
+      }
+      .invigilator {
+        text-align: left;
+        font-weight: bold;
+      }
+      .course-summary {
+        border-top: 2px solid black;
+      }
+      @media print {
+        @page {
+          size: landscape; /* Force landscape mode for printing */
+          margin: 0.5cm; /* Small margins */
+        }
+        body {
+          -webkit-print-color-adjust: exact;
+          color-adjust: exact; /* Ensures backgrounds print */
+        }
+        .classroom-container { 
+          page-break-after: always;
+          width: 100%;
+        }
+        table { 
+          page-break-inside: avoid;
+          width: 100%;
+          max-width: 100%;
+        }
+        td, th {
+          font-size: 9pt; /* Ensure font is readable but compact */
+        }
+      }
+    </style>
+  </head>
+  <body>`;
+  
+  classrooms.forEach((classroom, index) => {
+    html += `
+    <div class="classroom-container">
+      <table>
+        <tr class="exam-header">
+          <th colspan="12">B.TECH DEGREE S7(R&S) SEMESTER EXAMINATION NOVEMBER 2024 (2019 SCHEME)</th>
+        </tr>
+        <tr>
+          <th colspan="10">HALL: ${classroom.name}</th>
+          <th colspan="2">Date: ${formattedDate}</th>
+        </tr>`;
+    
+    // Generate column headers with equal width
+    html += `<tr>`;
+    for (let i = 0; i < columnLabels.length; i++) {
+      html += `
+        <th>Seat No.</th>
+        <th>Reg No.</th>`;
+    }
+    html += `</tr>`;
+    
+    // Generate rows with seats and registration numbers
+    for (let row = 0; row < classroom.seating.length; row++) {
+      html += `<tr>`;
+      
+      for (let col = 0; col < columnLabels.length; col++) {
+        const seatNumber = row + 1;
+        const student = classroom.seating[row][col];
+        const seatLabel = `${columnLabels[col]}${seatNumber}`;
+        
+        html += `
+        <td>${seatLabel}</td>
+        <td>${student ? student[1] : ""}</td>`;
+      }
+      
+      html += `</tr>`;
+    }
+    
+    // Get non-empty courses (ones with students)
+    const activeCourses = Object.entries(classroom.courseCounts)
+      .filter(([course, count]) => count > 0)
+      .sort(([courseA, countA], [courseB, countB]) => courseA.localeCompare(courseB));
+    
+    // Function to extract course code
+    function extractCourseCode(courseName) {
+      // Look for pattern like "XXX000" or "( XXX000 )"
+      const codeMatch = courseName.match(/\(\s*([A-Z]{2,3}\d{3})\s*\)/);
+      if (codeMatch && codeMatch[1]) {
+        return codeMatch[1]; // Return just the code
+      }
+      return courseName; // Return original if no match
+    }
+    
+    // Course summary section
+    html += `
+      <tr class="course-summary">
+        <td colspan="2" class="invigilator">INVIGILATOR:</td>
+        <td colspan="6"></td>`;
+    
+    if (activeCourses.length > 0) {
+      const courseCode = extractCourseCode(activeCourses[0][0]);
+      html += `
+        <td colspan="2">${courseCode}</td>
+        <td colspan="2">${activeCourses[0][1]}</td>`;
+    } else {
+      html += `
+        <td colspan="4"></td>`;
+    }
+    
+    html += `</tr>`;
+    
+    // Add remaining courses
+    for (let i = 1; i < activeCourses.length; i++) {
+      const courseCode = extractCourseCode(activeCourses[i][0]);
+      html += `
+      <tr>
+        <td colspan="8"></td>
+        <td colspan="2">${courseCode}</td>
+        <td colspan="2">${activeCourses[i][1]}</td>
+      </tr>`;
+    }
+    
+    html += `
+      </table>
+    </div>`;
+  });
+  
+  html += `
+  </body>
+  </html>`;
+  
+  return html;
+}
+
+function generateRegistrationRangeHTML(classrooms) {
+  const currentDate = new Date("2025-03-30");
+  const formattedDate = `${currentDate.getDate()}/${currentDate.getMonth() + 1}/${currentDate.getFullYear()} FN`;
+  
+  // Process and group registration numbers for each classroom
+  classrooms.forEach(classroom => {
+    // Group students by registration number prefix
+    const studentsByPrefix = {};
+    
+    classroom.allStudents.forEach(student => {
+      const regNo = student.regNo;
+      
+      // Extract the prefix part (e.g., "LTLY22CE", "LTLY21IT")
+      // Improved regex to better capture the pattern in registration numbers
+      const prefixMatch = regNo.match(/^([A-Z]+\d+[A-Z]+)/);
+      if (prefixMatch && prefixMatch[1]) {
+        const prefix = prefixMatch[1];
+        
+        if (!studentsByPrefix[prefix]) {
+          studentsByPrefix[prefix] = [];
+        }
+        
+        // Extract the numeric part at the end
+        const numericPart = regNo.substring(prefix.length);
+        studentsByPrefix[prefix].push({
+          fullRegNo: regNo,
+          numericPart: parseInt(numericPart, 10)
+        });
+      } else {
+        // For registration numbers that don't match the expected pattern
+        if (!studentsByPrefix['OTHER']) {
+          studentsByPrefix['OTHER'] = [];
+        }
+        studentsByPrefix['OTHER'].push({
+          fullRegNo: regNo,
+          numericPart: 0
+        });
+      }
+    });
+    
+    // Create more consolidated ranges per prefix
+    const formattedRanges = [];
+    
+    Object.keys(studentsByPrefix).forEach(prefix => {
+      const students = studentsByPrefix[prefix];
+      
+      // Sort by numeric part
+      students.sort((a, b) => a.numericPart - b.numericPart);
+      
+      if (students.length === 0) return;
+      
+      // For each prefix, just take the first and last registration number
+      // This ignores small gaps in the sequence
+      if (students.length === 1) {
+        // Single student with this prefix
+        formattedRanges.push(students[0].fullRegNo);
+      } else {
+        // Multiple students - create a range from first to last
+        const first = students[0].fullRegNo;
+        const last = students[students.length - 1].fullRegNo;
+        formattedRanges.push(`${first}-${last}`);
+      }
+    });
+    
+    // Store the formatted ranges with the classroom
+    classroom.formattedRanges = formattedRanges;
+  });
+  
+  let html = `<!DOCTYPE html>
+  <html>
+  <head>
+    <style>
+      body { 
+        font-family: Arial, sans-serif; 
+        margin: 0;
+        padding: 20px;
+        background-color: #f5f5f5;
+      }
+      .container {
+        max-width: 800px;
+        margin: 0 auto;
+        background-color: white;
+        padding: 20px;
+        box-shadow: 0 0 10px rgba(0,0,0,0.1);
+      }
+      .header {
+        text-align: center;
+        margin-bottom: 20px;
+      }
+      h2, h3 {
+        margin: 10px 0;
+      }
+      table { 
+        border-collapse: collapse; 
+        width: 100%; 
+        margin-bottom: 30px;
+      }
+      th, td { 
+        border: 1px solid black; 
+        padding: 8px; 
+        text-align: center; 
+      }
+      th { 
+        background-color: #333; 
+        color: white;
+        font-weight: bold;
+      }
+      .hall-cell {
+        font-weight: bold;
+        background-color: #f2f2f2;
+        vertical-align: middle;
+      }
+      .note {
+        font-size: 12px;
+        border-top: 1px solid #ccc;
+        padding-top: 15px;
+        margin-top: 30px;
+      }
+      @media print {
+        body {
+          background-color: white;
+        }
+        .container {
+          box-shadow: none;
+          padding: 0;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <div class="header">
+        <h2>COLLEGE OF ENGINEERING THALASSERY</h2>
+        <h3>KTU S7(R&S) SEMESTER EXAMINATION, NOV 2024</h3>
+        <p>SEATING ARRANGEMENT FOR: Date: ${formattedDate}</p>
+      </div>
+      
+      <table>
+        <tr>
+          <th>HALL</th>
+          <th>REGISTER NO:</th>
+        </tr>`;
+  
+  // Add classroom data
+  classrooms.forEach(classroom => {
+    if (!classroom.formattedRanges || classroom.formattedRanges.length === 0) {
+      return; // Skip classrooms with no students
+    }
+    
+    html += `
+        <tr>
+          <td class="hall-cell" rowspan="${classroom.formattedRanges.length || 1}">${classroom.name}</td>
+          <td>${classroom.formattedRanges[0] || ""}</td>
+        </tr>`;
+    
+    // Add remaining ranges for this classroom
+    for (let i = 1; i < classroom.formattedRanges.length; i++) {
+      html += `
+        <tr>
+          <td>${classroom.formattedRanges[i]}</td>
+        </tr>`;
+    }
+  });
+  
+  html += `
+      </table>
+      
+      <div class="note">
+        <p>NB:- Please enter the examination Hall before 9.30 A.M</p>
+        <p>Mobile phones are not permitted in Examination Hall</p>
+      </div>
+    </div>
+  </body>
+  </html>`;
+  
+  return html;
+}

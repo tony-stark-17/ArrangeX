@@ -1,0 +1,157 @@
+const csv = require('csv-parser');
+const fs = require('fs');
+const path = require('path');
+
+const classrooms = [];
+
+const classroomConfigs = [
+    { columns: 9, rows: 10 },
+    { columns: 9, rows: 10 },
+    { columns: 9, rows: 10 },
+    { columns: 9, rows: 10 },
+    { columns: 9, rows: 10 },
+    { columns: 9, rows: 10 },
+    { columns: 9, rows: 10 },
+    { columns: 9, rows: 10 },
+    { columns: 9, rows: 10 },
+
+  ];
+
+// Read and parse CSV
+const students = [];
+fs.createReadStream(path.join(__dirname, 'studentList2.csv'))
+  .pipe(csv({
+    headers: false,
+    skipLines: 1 // Skip header if present (assuming CSV has no header)
+  }))
+  .on('data', (row) => {
+    students.push(row);
+  })
+  .on('end', () => {
+    // Group students by course (4th column, index 3)
+    const groups = {};
+    students.forEach(student => {
+      const course = student[3];
+      if (!groups[course]) {
+        groups[course] = [];
+      }
+      groups[course].push(student);
+    });
+
+    const courseNames = Object.keys(groups);
+    let numCourses = courseNames.length;
+    let slots = [];
+    let numSlots;
+
+    if (numCourses === 1) {
+      // Handle single course: create two slots (one with course, one empty)
+      slots = [courseNames, []];
+      numSlots = 2;
+    } else {
+      // Determine number of slots (ceil(numCourses / 2))
+      numSlots = Math.ceil(numCourses / 2);
+      for (let i = 0; i < numSlots; i++) {
+        const start = i * 2;
+        const end = start + 2;
+        slots.push(courseNames.slice(start, end));
+      }
+    }
+
+    // Create queues for each course
+    const queues = {};
+    courseNames.forEach(course => {
+      queues[course] = [...groups[course]];
+    });
+
+    // Generate classrooms
+    classroomConfigs.forEach(config => {
+        const classroom = generateClassroom(config.columns, config.rows, slots, queues);
+        classrooms.push(classroom);
+      });
+      
+      // After processing all classroomConfigs
+        // After processing all classroomConfigs
+        let remainingStudents = 0;
+        const tempQueues = {}; // Create a copy of queues for simulation
+        Object.keys(queues).forEach(course => {
+        tempQueues[course] = [...queues[course]]; // Deep copy queues
+        remainingStudents += tempQueues[course].length;
+        });
+
+        if (remainingStudents > 0) {
+        const lastConfig = classroomConfigs[classroomConfigs.length - 1];
+        let additionalClassrooms = 0;
+
+        // Simulate classroom generation until queues are empty
+        while (true) {
+            let allEmpty = true;
+            Object.values(tempQueues).forEach(queue => {
+            if (queue.length > 0) allEmpty = false;
+            });
+            if (allEmpty) break;
+
+            generateClassroom(lastConfig.columns, lastConfig.rows, slots, tempQueues);
+            additionalClassrooms++;
+        }
+
+        console.log(`\n⚠️ Insufficient classrooms!`);
+        console.log(`▶ Need ${additionalClassrooms} more classroom(s) of ${lastConfig.columns}x${lastConfig.rows}`);
+        console.log(`   to seat ${remainingStudents} remaining student(s) using current distribution logic.`);
+        }
+      
+
+    // Generate HTML
+    const html = generateHTML(classrooms);
+    fs.writeFileSync('seating_arrangement.html', html);
+    console.log('Seating arrangement generated as seating_arrangement.html');
+  });
+
+function generateClassroom(columns, rows, slots, queues) {
+  const seating = Array.from({ length: rows }, () => Array(columns).fill(null));
+  for (let col = 0; col < columns; col++) {
+    const slotIndex = col % slots.length;
+    const slotCourses = slots[slotIndex];
+    let courseIndex = 0;
+
+    for (let row = 0; row < rows; row++) {
+      let student = null;
+      let attempts = 0;
+      while (attempts < slotCourses.length && !student) {
+        const course = slotCourses[courseIndex % slotCourses.length];
+        if (course && queues[course] && queues[course].length > 0) {
+          student = queues[course].shift();
+          seating[row][col] = student;
+        } else {
+          courseIndex++;
+          attempts++;
+        }
+      }
+    }
+  }
+  return seating;
+}
+
+function generateHTML(classrooms) {
+    let html = '<html><body>';
+    classrooms.forEach((classroom, index) => {
+      html += `<h2>Classroom ${index + 1}</h2>`;
+      html += '<table border="1">';
+      const rows = classroom.length;
+      const columns = classroom[0].length;
+      for (let row = 0; row < rows; row++) {
+        html += '<tr>';
+        for (let col = 0; col < columns; col++) {
+          const student = classroom[row][col];
+          if (student) {
+            html += `<td>${student[0]}<br>${student[1]}<br>${student[3]}</td>`;
+          } else {
+            html += '<td>Empty</td>';
+          }
+        }
+        html += '</tr>';
+      }
+      html += '</table>';
+    });
+    html += '</body></html>';
+    return html;
+  }

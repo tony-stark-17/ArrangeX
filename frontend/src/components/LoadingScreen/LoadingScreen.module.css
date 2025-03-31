@@ -1,0 +1,13 @@
+.loadingscreen{
+    background-color: #111111;
+    width: 100vw;
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+}
+
+.loadingscreen img{
+    width: 12%;
+}
