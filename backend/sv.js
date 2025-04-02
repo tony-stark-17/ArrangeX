@@ -393,7 +393,6 @@ function generateClassroom(columns, rows, slots, queues, numCourses) {
 function generateHTML(classrooms) {
   const currentDate = new Date();
   const formattedDate = `${currentDate.getDate()}.${currentDate.getMonth() + 1}.${currentDate.getFullYear()} F.N`;
-  
   let html = `<!DOCTYPE html>
   <html>
   <head>
@@ -404,8 +403,8 @@ function generateHTML(classrooms) {
         padding: 0;
       }
       .classroom-container {
-        page-break-after: always; /* Forces a page break after each classroom */
-        padding: 10px;
+        page-break-after: always; 
+        padding: 0; 
         width: 100%;
         box-sizing: border-box;
       }
@@ -415,18 +414,19 @@ function generateHTML(classrooms) {
       table { 
         border-collapse: collapse; 
         width: 100%; 
+        max-width: 100%; 
         margin-bottom: 20px; 
         page-break-inside: avoid; 
-        table-layout: fixed; /* Ensures equal column widths */
-        font-size: 10px; /* Smaller font size to fit everything */
+        font-size: 20px; /* Increased overall font size */
       }
       th, td { 
-        border: 1px solid black; 
-        padding: 4px; /* Reduced padding */
-        text-align: center; 
-        overflow: hidden;
+        border: 1px solid black;
+        padding: 4px;
+        text-align: center;
         white-space: nowrap;
-        text-overflow: ellipsis; /* Shows ellipsis for long text */
+        word-wrap: break-word;
+        min-width: 0;
+        width: 2%;
       }
       th { 
         background-color: #f2f2f2; 
@@ -437,7 +437,7 @@ function generateHTML(classrooms) {
         font-weight: bold;
       }
       .classroom-name {
-        font-size: 14px;
+        font-size: 16px;
         font-weight: bold;
         background-color: #d9d9d9;
       }
@@ -448,32 +448,31 @@ function generateHTML(classrooms) {
       .course-summary {
         border-top: 2px solid black;
       }
+      .reg-no {
+        font-weight: bold;
+        width: auto;
+      }
       @media print {
         @page {
-          size: landscape; /* Force landscape mode for printing */
-          margin: 0.5cm; /* Small margins */
+          size: landscape; 
+          margin: 0.5cm; 
         }
         body {
           -webkit-print-color-adjust: exact;
-          color-adjust: exact; /* Ensures backgrounds print */
+          color-adjust: exact; 
         }
         .classroom-container { 
           page-break-after: always;
           width: 100%;
         }
-        table { 
-          page-break-inside: avoid;
-          width: 100%;
-          max-width: 100%;
-        }
-        td, th {
-          font-size: 9pt; /* Ensure font is readable but compact */
+        table{
+          max-width: 99%;
+          height: 100vh;
         }
       }
     </style>
   </head>
   <body>`;
-  
   classrooms.forEach((classroom, index) => {
     html += `
     <div class="classroom-container">
@@ -485,54 +484,36 @@ function generateHTML(classrooms) {
           <th colspan="10">HALL: ${classroom.name}</th>
           <th colspan="2">Date: ${formattedDate}</th>
         </tr>`;
-    
-    // Generate column headers with equal width
     html += `<tr>`;
     for (let i = 0; i < columnLabels.length; i++) {
       html += `
-        <th>Seat No.</th>
-        <th>Reg No.</th>`;
+        <th class="seat-no">Seat No.</th>
+        <th class="reg-no">Reg No.</th>`;
     }
     html += `</tr>`;
-    
-    // Generate rows with seats and registration numbers
     for (let row = 0; row < classroom.seating.length; row++) {
       html += `<tr>`;
-      
       for (let col = 0; col < columnLabels.length; col++) {
         const seatNumber = row + 1;
         const student = classroom.seating[row][col];
         const seatLabel = `${columnLabels[col]}${seatNumber}`;
-        
         html += `
-        <td>${seatLabel}</td>
-        <td>${student ? student[1] : ""}</td>`;
+        <td class="seat-no">${seatLabel}</td>
+        <td class="reg-no">${student ? student[1] : ""}</td>`;
       }
-      
       html += `</tr>`;
     }
-    
-    // Get non-empty courses (ones with students)
     const activeCourses = Object.entries(classroom.courseCounts)
       .filter(([course, count]) => count > 0)
       .sort(([courseA, countA], [courseB, countB]) => courseA.localeCompare(courseB));
-    
-    // Function to extract course code
     function extractCourseCode(courseName) {
-      // Look for pattern like "XXX000" or "( XXX000 )"
       const codeMatch = courseName.match(/\(\s*([A-Z]{2,3}\d{3})\s*\)/);
-      if (codeMatch && codeMatch[1]) {
-        return codeMatch[1]; // Return just the code
-      }
-      return courseName; // Return original if no match
+      return codeMatch && codeMatch[1] ? codeMatch[1] : courseName;
     }
-    
-    // Course summary section
     html += `
       <tr class="course-summary">
         <td colspan="2" class="invigilator">INVIGILATOR:</td>
         <td colspan="6"></td>`;
-    
     if (activeCourses.length > 0) {
       const courseCode = extractCourseCode(activeCourses[0][0]);
       html += `
@@ -542,10 +523,7 @@ function generateHTML(classrooms) {
       html += `
         <td colspan="4"></td>`;
     }
-    
     html += `</tr>`;
-    
-    // Add remaining courses
     for (let i = 1; i < activeCourses.length; i++) {
       const courseCode = extractCourseCode(activeCourses[i][0]);
       html += `
@@ -555,18 +533,16 @@ function generateHTML(classrooms) {
         <td colspan="2">${activeCourses[i][1]}</td>
       </tr>`;
     }
-    
     html += `
       </table>
     </div>`;
   });
-  
   html += `
   </body>
   </html>`;
-  
   return html;
 }
+
 
 function generateRegistrationRangeHTML(classrooms) {
   const currentDate = new Date("2025-03-30");
@@ -667,21 +643,26 @@ function generateRegistrationRangeHTML(classrooms) {
       }
       th, td { 
         border: 1px solid black; 
-        padding: 8px; 
+        padding: 12px; /* Increased padding */
         text-align: center; 
+        font-size: 25px;
+        font-weight: bold; /* Make all registration ranges bold */
       }
       th { 
         background-color: #333; 
         color: white;
         font-weight: bold;
+        font-size: 18px; /* Even larger font for headers */
       }
       .hall-cell {
         font-weight: bold;
         background-color: #f2f2f2;
         vertical-align: middle;
+        font-size: 40px; /* Larger font for classroom names */
+        letter-spacing: 0.5px; /* Better letter spacing for readability */
       }
       .note {
-        font-size: 12px;
+        font-size: 14px; /* Slightly larger note text */
         border-top: 1px solid #ccc;
         padding-top: 15px;
         margin-top: 30px;
@@ -693,6 +674,16 @@ function generateRegistrationRangeHTML(classrooms) {
         .container {
           box-shadow: none;
           padding: 0;
+        }
+        /* Ensure proper printing of the larger fonts */
+        th, td {
+          font-size: 14pt; /* Print-specific font sizes */
+        }
+        th {
+          font-size: 16pt;
+        }
+        .hall-cell {
+          font-size: 18pt;
         }
       }
     </style>

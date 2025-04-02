@@ -29,21 +29,26 @@
       }
       th, td { 
         border: 1px solid black; 
-        padding: 8px; 
+        padding: 12px; /* Increased padding */
         text-align: center; 
+        font-size: 25px;
+        font-weight: bold; /* Make all registration ranges bold */
       }
       th { 
         background-color: #333; 
         color: white;
         font-weight: bold;
+        font-size: 18px; /* Even larger font for headers */
       }
       .hall-cell {
         font-weight: bold;
         background-color: #f2f2f2;
         vertical-align: middle;
+        font-size: 40px; /* Larger font for classroom names */
+        letter-spacing: 0.5px; /* Better letter spacing for readability */
       }
       .note {
-        font-size: 12px;
+        font-size: 14px; /* Slightly larger note text */
         border-top: 1px solid #ccc;
         padding-top: 15px;
         margin-top: 30px;
@@ -55,6 +60,16 @@
         .container {
           box-shadow: none;
           padding: 0;
+        }
+        /* Ensure proper printing of the larger fonts */
+        th, td {
+          font-size: 14pt; /* Print-specific font sizes */
+        }
+        th {
+          font-size: 16pt;
+        }
+        .hall-cell {
+          font-size: 18pt;
         }
       }
     </style>

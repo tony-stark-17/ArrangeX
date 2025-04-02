@@ -25,13 +25,6 @@ const classroomConfigs = [
   { columns: 6, rows: 5, name: "CS13" },
   { columns: 6, rows: 5, name: "CS14" },
   { columns: 6, rows: 5, name: "CS15" },
-  { columns: 6, rows: 5, name: "CS16" },
-  { columns: 6, rows: 5, name: "CS17" },
-  { columns: 6, rows: 5, name: "CS18" },
-  { columns: 6, rows: 5, name: "CS19" },
-  { columns: 6, rows: 5, name: "CS20" },
-  { columns: 6, rows: 5, name: "CS21" },
-  { columns: 6, rows: 5, name: "CS22" },
 ];
 
 // Column labels for the seating arrangement (used internally)
@@ -48,7 +41,7 @@ fs.createReadStream(path.join(__dirname, 'studentList2.csv'))
     students.push(row);
   })
   .on('end', () => {
-    // Group students by course (4th column, index 3)
+    // Group students by course (7th column, index 7)
     const groups = {};
     students.forEach(student => {
       const course = student[7];
@@ -58,14 +51,15 @@ fs.createReadStream(path.join(__dirname, 'studentList2.csv'))
       groups[course].push(student);
     });
     console.log(Object.keys(groups))
-    const courseNames = Object.keys(groups);
+    const courseNames = Object.keys(groups).sort((a, b) => groups[b].length - groups[a].length);
     let numCourses = courseNames.length;
     let slots = [];
     let numSlots;
 
     if (numCourses === 1) {
-      slots = [courseNames, []];
-      numSlots = 2;
+      // For single course, we'll handle this differently in generateClassroom
+      slots = [courseNames[0]];
+      numSlots = 1;
     } else {
       numSlots = Math.ceil(numCourses / 2);
       for (let i = 0; i < numSlots; i++) {
@@ -83,7 +77,7 @@ fs.createReadStream(path.join(__dirname, 'studentList2.csv'))
 
     // Generate classrooms
     classroomConfigs.forEach(config => {
-      const classroom = generateClassroom(config.columns, config.rows, slots, queues);
+      const classroom = generateClassroom(config.columns, config.rows, slots, queues, numCourses);
       classroom.name = config.name;
       
       // Count students per course in this classroom
@@ -132,7 +126,7 @@ fs.createReadStream(path.join(__dirname, 'studentList2.csv'))
         });
         if (allEmpty) break;
 
-        generateClassroom(lastConfig.columns, lastConfig.rows, slots, tempQueues);
+        generateClassroom(lastConfig.columns, lastConfig.rows, slots, tempQueues, numCourses);
         additionalClassrooms++;
       }
 
@@ -152,28 +146,247 @@ fs.createReadStream(path.join(__dirname, 'studentList2.csv'))
     console.log('Registration ranges generated as registration_ranges.html');
   });
 
-function generateClassroom(columns, rows, slots, queues) {
+// Replace the generateClassroom function with this improved version
+function generateClassroom(columns, rows, slots, queues, numCourses) {
   const seating = Array.from({ length: rows }, () => Array(columns).fill(null));
-  for (let col = 0; col < columns; col++) {
-    const slotIndex = col % slots.length;
-    const slotCourses = slots[slotIndex];
-    let courseIndex = 0;
-
-    for (let row = 0; row < rows; row++) {
-      let student = null;
-      let attempts = 0;
-      while (attempts < slotCourses.length && !student) {
-        const course = slotCourses[courseIndex % slotCourses.length];
-        if (course && queues[course] && queues[course].length > 0) {
-          student = queues[course].shift();
-          seating[row][col] = student;
-        } else {
-          courseIndex++;
-          attempts++;
+  
+  // Count how many courses still have students and which ones they are
+  const activeCourses = [];
+  for (const [course, queue] of Object.entries(queues)) {
+    if (queue.length > 0) {
+      activeCourses.push(course);
+    }
+  }
+  
+  // Check if we're dealing with a single course scenario
+  const isSingleCourse = activeCourses.length === 1;
+  
+  if (isSingleCourse) {
+    // For single course, use a zigzag pattern to maximize distance between students
+    const courseName = activeCourses[0];
+    
+    // Fill even-numbered columns first (0, 2, 4...)
+    for (let col = 0; col < columns; col += 2) {
+      for (let row = 0; row < rows; row++) {
+        if (queues[courseName] && queues[courseName].length > 0) {
+          seating[row][col] = queues[courseName].shift();
         }
       }
     }
+    
+    // Then fill odd-numbered columns (1, 3, 5...)
+    for (let col = 1; col < columns; col += 2) {
+      for (let row = 0; row < rows; row++) {
+        if (queues[courseName] && queues[courseName].length > 0) {
+          seating[row][col] = queues[courseName].shift();
+        }
+      }
+    }
+  } else {
+    // Multiple courses - use a completely different allocation strategy
+    
+    // Create a 2D map to track which course is assigned to each seat
+    const seatCourses = Array.from({ length: rows }, () => Array(columns).fill(null));
+    
+    // Define a function to check if a course can be placed at a specific position
+    const canPlaceCourse = (row, col, course) => {
+      // Check horizontally adjacent seats
+      if (col > 0 && seatCourses[row][col-1] === course) return false;
+      if (col < columns-1 && seatCourses[row][col+1] === course) return false;
+      
+      // Check vertically adjacent seats (optional, less important constraint)
+      // if (row > 0 && seatCourses[row-1][col] === course) return false;
+      // if (row < rows-1 && seatCourses[row+1][col] === course) return false;
+      
+      return true;
+    };
+    
+    // Sort courses by number of students (descending)
+    const sortedCourses = [...activeCourses].sort((a, b) => 
+      queues[b].length - queues[a].length
+    );
+    
+    // First pass: assign courses to columns in a way that avoids adjacency
+    // We'll use a strategy where we alternate columns for different courses
+    
+    // Group columns into odd and even
+    const evenColumns = Array.from({ length: Math.ceil(columns/2) }, (_, i) => i * 2)
+      .filter(col => col < columns);
+    const oddColumns = Array.from({ length: Math.floor(columns/2) }, (_, i) => i * 2 + 1);
+    
+    // Assign major courses to column groups
+    let courseIndex = 0;
+    
+    // Function to fill a set of columns with students from a specific course
+    const fillColumnSet = (columnSet, course) => {
+      if (!queues[course] || queues[course].length === 0) return false;
+      
+      let studentsPlaced = 0;
+      
+      for (const col of columnSet) {
+        for (let row = 0; row < rows; row++) {
+          if (seating[row][col] === null && queues[course].length > 0 && canPlaceCourse(row, col, course)) {
+            seating[row][col] = queues[course].shift();
+            seatCourses[row][col] = course;
+            studentsPlaced++;
+          }
+        }
+      }
+      
+      return studentsPlaced > 0;
+    };
+    
+    // First fill even columns with the course that has the most students
+    if (sortedCourses.length > 0) {
+      fillColumnSet(evenColumns, sortedCourses[0]);
+      courseIndex++;
+    }
+    
+    // Then fill odd columns with the course that has the second most students
+    if (sortedCourses.length > 1) {
+      fillColumnSet(oddColumns, sortedCourses[1]);
+      courseIndex++;
+    }
+    
+    // Then try to assign remaining courses to specific columns
+    // but ensure no course appears in adjacent columns
+    while (courseIndex < sortedCourses.length) {
+      const course = sortedCourses[courseIndex];
+      
+      // Find columns where this course can be placed without adjacency issues
+      const availableColumns = [];
+      for (let col = 0; col < columns; col++) {
+        let canUseColumn = true;
+        
+        // Check if this course is already in adjacent columns
+        if (col > 0) {
+          for (let row = 0; row < rows; row++) {
+            if (seatCourses[row][col-1] === course) {
+              canUseColumn = false;
+              break;
+            }
+          }
+        }
+        
+        if (col < columns-1) {
+          for (let row = 0; row < rows; row++) {
+            if (seatCourses[row][col+1] === course) {
+              canUseColumn = false;
+              break;
+            }
+          }
+        }
+        
+        if (canUseColumn) {
+          availableColumns.push(col);
+        }
+      }
+      
+      // Sort available columns to prefer those with more empty seats
+      availableColumns.sort((a, b) => {
+        const emptySeatsA = seating.filter(row => row[a] === null).length;
+        const emptySeatsB = seating.filter(row => row[b] === null).length;
+        return emptySeatsB - emptySeatsA;
+      });
+      
+      // Try to place students in available columns
+      let studentsPlaced = false;
+      for (const col of availableColumns) {
+        for (let row = 0; row < rows; row++) {
+          if (seating[row][col] === null && queues[course].length > 0 && canPlaceCourse(row, col, course)) {
+            seating[row][col] = queues[course].shift();
+            seatCourses[row][col] = course;
+            studentsPlaced = true;
+          }
+        }
+      }
+      
+      // Move to next course regardless of whether we placed students
+      // This prevents getting stuck on a course with few students
+      courseIndex++;
+      
+      // If we've gone through all courses but still have empty seats and students,
+      // start again from the course with the most remaining students
+      if (courseIndex >= sortedCourses.length) {
+        // Recalculate active courses
+        const remainingCourses = [];
+        for (const [course, queue] of Object.entries(queues)) {
+          if (queue.length > 0) {
+            remainingCourses.push(course);
+          }
+        }
+        
+        if (remainingCourses.length > 0) {
+          // Sort by remaining students
+          remainingCourses.sort((a, b) => queues[b].length - queues[a].length);
+          sortedCourses.length = 0; // Clear the array
+          sortedCourses.push(...remainingCourses);
+          courseIndex = 0;
+          
+          // Check if we've actually placed any students in the last full cycle
+          if (!studentsPlaced) {
+            // If we couldn't place any students with strict adjacency rules,
+            // we need to relax the constraints to fill remaining seats
+            break;
+          }
+        } else {
+          break; // No more students to place
+        }
+      }
+    }
+    
+    // Final pass - fill remaining empty seats, still trying to maintain
+    // separation but with relaxed constraints if necessary
+    let hasEmptySeats = true;
+    while (hasEmptySeats) {
+      hasEmptySeats = false;
+      
+      // Recalculate active courses with remaining students
+      const remainingCourses = Object.entries(queues)
+        .filter(([_, queue]) => queue.length > 0)
+        .map(([course, _]) => course)
+        .sort((a, b) => queues[b].length - queues[a].length);
+      
+      if (remainingCourses.length === 0) break;
+      
+      // Try to place students with the adjacency constraint
+      for (let col = 0; col < columns; col++) {
+        for (let row = 0; row < rows; row++) {
+          if (seating[row][col] === null) {
+            hasEmptySeats = true;
+            
+            // Try each course, prioritizing those with most students
+            let placed = false;
+            for (const course of remainingCourses) {
+              if (queues[course].length > 0 && canPlaceCourse(row, col, course)) {
+                seating[row][col] = queues[course].shift();
+                seatCourses[row][col] = course;
+                placed = true;
+                break;
+              }
+            }
+            
+            // If no course could be placed with adjacency constraint,
+            // just place the course with the most students
+            if (!placed && remainingCourses.length > 0) {
+              const course = remainingCourses[0];
+              if (queues[course].length > 0) {
+                seating[row][col] = queues[course].shift();
+                seatCourses[row][col] = course;
+              }
+            }
+          }
+        }
+      }
+      
+      // If we've gone through all seats but still couldn't place anyone,
+      // we should break to avoid an infinite loop
+      if (hasEmptySeats && remainingCourses.every(course => queues[course].length === 0)) {
+        break;
+      }
+    }
   }
+  
   return { seating };
 }
 
@@ -388,7 +601,7 @@ function generateRegistrationRangeHTML(classrooms) {
         if (!studentsByPrefix['OTHER']) {
           studentsByPrefix['OTHER'] = [];
         }
-        studentsByPrefix[prefix].push({
+        studentsByPrefix['OTHER'].push({
           fullRegNo: regNo,
           numericPart: 0
         });
@@ -454,21 +667,26 @@ function generateRegistrationRangeHTML(classrooms) {
       }
       th, td { 
         border: 1px solid black; 
-        padding: 8px; 
+        padding: 12px; /* Increased padding */
         text-align: center; 
+        font-size: 25px;
+        font-weight: bold; /* Make all registration ranges bold */
       }
       th { 
         background-color: #333; 
         color: white;
         font-weight: bold;
+        font-size: 18px; /* Even larger font for headers */
       }
       .hall-cell {
         font-weight: bold;
         background-color: #f2f2f2;
         vertical-align: middle;
+        font-size: 40px; /* Larger font for classroom names */
+        letter-spacing: 0.5px; /* Better letter spacing for readability */
       }
       .note {
-        font-size: 12px;
+        font-size: 14px; /* Slightly larger note text */
         border-top: 1px solid #ccc;
         padding-top: 15px;
         margin-top: 30px;
@@ -480,6 +698,16 @@ function generateRegistrationRangeHTML(classrooms) {
         .container {
           box-shadow: none;
           padding: 0;
+        }
+        /* Ensure proper printing of the larger fonts */
+        th, td {
+          font-size: 14pt; /* Print-specific font sizes */
+        }
+        th {
+          font-size: 16pt;
+        }
+        .hall-cell {
+          font-size: 18pt;
         }
       }
     </style>
