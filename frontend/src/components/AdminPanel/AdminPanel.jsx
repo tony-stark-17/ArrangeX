@@ -1,7 +1,8 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Button } from "@heroui/button";
 import { User } from "@heroui/user";
 import { Icon } from '@iconify-icon/react';
+import { useNavigate } from 'react-router';
 
 import ManageUsers from './ManageUsers';
 import ManageHalls from './ManageHalls';
@@ -11,7 +12,18 @@ import Logo from '../../assets/logo.png'
 import classes from './AdminPanel.module.css'
 
 const AdminPanel = () =>{
+    const navigate = useNavigate();
     const [activeTab, setActiveTab] = useState("users");
+    const [userDetails, setUserDetails] = useState({})
+
+    useEffect(() => {
+        const userData = JSON.parse(localStorage.getItem('userDetails'));
+        if(userData){
+            setUserDetails(userData)
+        }else{
+            navigate('/login')
+        }
+    }, [])
     const handleTabChange = (tab) => {
         setActiveTab(tab);
     };
@@ -32,10 +44,13 @@ const AdminPanel = () =>{
                         avatarProps={{
                             src: "https://i.pravatar.cc/150?u=a04258114e29026702d",
                         }}
-                        description="Head of IT Dept."
-                        name="Tony Stark"
+                        description={userDetails.designation}
+                        name={userDetails.name}
                     />
-                    <Button isIconOnly aria-label="Like" color="primary" className='rounded-md text-white' size='sm'>
+                    <Button isIconOnly aria-label="Like" color="primary" className='rounded-md text-white' size='sm' onPress={() => {
+                        localStorage.removeItem('userDetails')
+                        navigate('/login')
+                    }}>
                         <Icon icon="material-symbols:logout" className='w-4'/>
                     </Button>
                 </div>

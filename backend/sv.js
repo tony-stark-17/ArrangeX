@@ -1,63 +1,269 @@
 const csv = require('csv-parser');
 const fs = require('fs');
 const path = require('path');
+const multer = require('multer');
+const express = require('express');
+const bodyParser = require('body-parser')
+const knex = require('knex')
+const app = express()
+const cors = require('cors');
 
-const classrooms = [];
+const storage = multer.memoryStorage(); // Store file in memory
+const upload = multer({ storage: storage });
 
-const classroomConfigs = [
-  { columns: 6, rows: 5, name: "EC5" },
-  { columns: 6, rows: 5, name: "EC6" },
-  { columns: 6, rows: 5, name: "EC7" },
-  { columns: 6, rows: 5, name: "EC8" },
-  { columns: 6, rows: 5, name: "EC9" },
-  { columns: 6, rows: 5, name: "EC10" },
-  { columns: 6, rows: 5, name: "EC11" },
-  { columns: 6, rows: 5, name: "EC12" },
-  { columns: 6, rows: 5, name: "EC13" },
-  { columns: 6, rows: 5, name: "CS5" },
-  { columns: 6, rows: 5, name: "CS6" },
-  { columns: 6, rows: 5, name: "CS7" },
-  { columns: 6, rows: 5, name: "CS8" },
-  { columns: 6, rows: 5, name: "CS9" },
-  { columns: 6, rows: 5, name: "CS10" },
-  { columns: 6, rows: 5, name: "CS11" },
-  { columns: 6, rows: 5, name: "CS12" },
-  { columns: 6, rows: 5, name: "CS13" },
-  { columns: 6, rows: 5, name: "CS14" },
-  { columns: 6, rows: 5, name: "CS15" },
-];
+const filesDir = path.join(__dirname, 'generated_files');
+if (!fs.existsSync(filesDir)) {
+    fs.mkdirSync(filesDir);
+}
 
-// Column labels for the seating arrangement (used internally)
-const columnLabels = ["AL", "AR", "BL", "BR", "CL", "CR"];
+// Serve static files from the generated_files directory
+// Function to clean up old files
+function cleanupOldFiles() {
+  console.log('Running file cleanup check...');
+  const now = Date.now();
+  const oneWeekInMs = 7 * 24 * 60 * 60 * 1000; // 7 days in milliseconds
+  
+  fs.readdir(filesDir, (err, files) => {
+    if (err) {
+      console.error('Error reading generated_files directory:', err);
+      return;
+    }
+    
+    files.forEach(file => {
+      const filePath = path.join(filesDir, file);
+      
+      fs.stat(filePath, (err, stats) => {
+        if (err) {
+          console.error(`Error getting stats for file ${file}:`, err);
+          return;
+        }
+        
+        const fileAge = now - stats.mtime.getTime();
+        
+        if (fileAge > oneWeekInMs) {
+          // Delete file if older than one week
+          fs.unlink(filePath, err => {
+            if (err) {
+              console.error(`Error deleting old file ${file}:`, err);
+            } else {
+              console.log(`Deleted old file: ${file}`);
+            }
+          });
+        }
+      });
+    });
+  });
+}
 
-// Read and parse CSV
-const students = [];
-fs.createReadStream(path.join(__dirname, 'studentList2.csv'))
-  .pipe(csv({
-    headers: false,
-    skipLines: 1
-  }))
-  .on('data', (row) => {
-    students.push(row);
-  })
-  .on('end', () => {
-    // Group students by course (7th column, index 7)
+// Run cleanup on server start
+cleanupOldFiles();
+
+// Schedule cleanup to run daily
+const CLEANUP_INTERVAL = 24 * 60 * 60 * 1000; // 24 hours in milliseconds
+setInterval(cleanupOldFiles, CLEANUP_INTERVAL);
+
+const db = knex({
+    client: 'mysql',
+    connection: {
+        host: '127.0.0.1',
+        port: '3306',
+        user: 'root',
+        password: '',
+        database: 'arrangex'
+    }
+})
+
+app.use(cors());
+app.use(bodyParser.json());
+app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
+
+app.get('/', (req, res) => {
+    console.log('Working')
+});
+
+app.post('/adminlogin', async (req, res) =>{
+  const { username, password } = req.body;
+  console.log('working')
+  if(!username || !password){
+      res.status(400).json('Please fill all the fields!')
+  }else{
+      try{
+          const user = await db('admins').where({username: username, password: password}).select('*');
+          if(user.length){
+              res.json({success: true, data: user[0]})
+          }else{
+              res.json({success: false})
+          }
+      }catch(error){
+          console.log(error)
+          res.status(400).json('Internal Server error')
+      }
+  }
+});
+
+app.get('/admins', async (req, res) => {
+  try {
+    const admins = await db('admins').select('*');
+    res.json(admins);
+  } catch (error) {
+    console.error('Error fetching admins:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+app.post('/addadmin', async (req, res) => {
+  const { username, password, designation, name } = req.body.data;
+  console.log(req.body)
+  if (!username || !password || !designation || !name) {
+    return res.status(400).json({ success: false, error: 'Please fill all the fields!' });
+  }
+  try {
+    // Check if the admin already exists
+    const existingAdmin = await db('admins').where({ username }).first();
+    console.log(existingAdmin)
+    if (existingAdmin) {
+      return res.status(400).json({ success: false, error: 'Admin already exists!' });
+    }
+    // Insert the new admin into the database
+    await db('admins').insert({ username, password, designation, name });
+    res.status(201).json({ success: true, message: 'Admin added successfully' });
+  } catch (error) {
+    console.error('Error adding admin:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+app.post('/addhall', async (req, res) => {
+  const { hallName, rows, columns } = req.body.data;
+  console.log(req.body)
+  if (!hallName || !rows || !columns) {
+    return res.status(400).json({ success: false, error: 'Please fill all the fields!' });
+  }
+  try {
+    // Check if the hall already exists
+    const existingHall = await db('halls').where({ name: hallName }).first();
+    if (existingHall) {
+      return res.status(400).json({ success: false, error: 'Hall already exists!' });
+    }
+    // Insert the new hall into the database
+    await db('halls').insert({ name: hallName, rows, columns });
+    res.status(201).json({ success: true, message: 'Hall added successfully' });
+  } catch (error) {
+    console.error('Error adding hall:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+app.put('/updatehall', async (req, res) => {
+  const { hallName, rows, columns } = req.body;
+  if (!rows || !columns) {
+    return res.status(400).json({ success: false, error: 'Please fill all the fields!' });
+  }
+  try {
+    // Update the hall in the database
+    await db('halls').where({ name: hallName }).update({ rows, columns });
+    res.status(200).json({ success: true, message: 'Hall updated successfully' });
+  } catch (error) {
+    console.error('Error updating hall:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+app.delete('/deleteadmin/:id', async (req, res) => {
+  const { id } = req.params;
+  try {
+    // Delete the admin from the database
+    await db('admins').where({ username:id }).del();
+    res.status(200).json({success: true, message: 'Admin deleted successfully' });
+  } catch (error) {
+    console.error('Error deleting admin:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+app.get('/halls', async (req, res) => {
+  try {
+    const halls = await db('halls').select('*');
+    res.json(halls);
+  } catch (error) {
+    console.error('Error fetching halls:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+app.post('/generate-seats', upload.single('studentList'), async (req, res) => {
+  const { examName, examDate, examHalls } = req.body;
+  const studentListFile = req.file; // This contains your file
+  
+  console.log('Body:', req.body);
+  console.log('File:', req.file);
+  
+  if (!examHalls || !studentListFile) {
+    return res.status(400).json({ success: false, error: 'Please fill all the fields!' });
+  }
+  
+  try {
+    // Parse the student list CSV from the uploaded file
+    const students = [];
+    const fileContent = studentListFile.buffer.toString('utf8');
+    
+    // Create a readable stream from the buffer
+    const bufferStream = new require('stream').Readable();
+    bufferStream.push(fileContent);
+    bufferStream.push(null);
+    
+    // Process the CSV data
+    await new Promise((resolve, reject) => {
+      bufferStream
+        .pipe(csv({
+          headers: false,
+          skipLines: 1
+        }))
+        .on('data', (row) => {
+          students.push(row);
+        })
+        .on('end', () => {
+          resolve();
+        })
+        .on('error', (error) => {
+          reject(error);
+        });
+    });
+    
+    // Fetch halls from database
+    let selectedHalls;
+    let isAll = examHalls.map(hall => hall.toLowerCase()).includes('all');
+    if (isAll) {
+      // Use all halls from the database
+      selectedHalls = await db('halls').select('*');
+    } else {
+      // Parse the selected hall names
+      const hallNames = examHalls;
+      // Fetch only the selected halls
+      selectedHalls = await db('halls').whereIn('name', hallNames).select('*');
+    }
+    
+    // Group students by course
     const groups = {};
+    let studentCount = 0;
     students.forEach(student => {
-      const course = student[7];
+      const course = student[7]; // Assuming course is in the 7th column
       if (!groups[course]) {
         groups[course] = [];
       }
       groups[course].push(student);
+      studentCount+=1;
     });
-    console.log(Object.keys(groups))
+    
+    console.log(`Total students: ${studentCount}`);
     const courseNames = Object.keys(groups).sort((a, b) => groups[b].length - groups[a].length);
     let numCourses = courseNames.length;
     let slots = [];
     let numSlots;
 
     if (numCourses === 1) {
-      // For single course, we'll handle this differently in generateClassroom
+      // For single course
       slots = [courseNames[0]];
       numSlots = 1;
     } else {
@@ -75,10 +281,12 @@ fs.createReadStream(path.join(__dirname, 'studentList2.csv'))
       queues[course] = [...groups[course]];
     });
 
-    // Generate classrooms
-    classroomConfigs.forEach(config => {
-      const classroom = generateClassroom(config.columns, config.rows, slots, queues, numCourses);
-      classroom.name = config.name;
+    // Generate seating arrangements for each hall
+    const classrooms = [];
+
+    selectedHalls.forEach(hall => {
+      const classroom = generateClassroom(hall.columns, hall.rows, slots, queues, numCourses);
+      classroom.name = hall.name;
       
       // Count students per course in this classroom
       const courseCounts = {};
@@ -86,8 +294,8 @@ fs.createReadStream(path.join(__dirname, 'studentList2.csv'))
       // Track all students in this classroom with their registration numbers
       const allStudents = [];
       
-      for (let row = 0; row < config.rows; row++) {
-        for (let col = 0; col < config.columns; col++) {
+      for (let row = 0; row < hall.rows; row++) {
+        for (let col = 0; col < hall.columns; col++) {
           const student = classroom.seating[row][col];
           if (student) {
             const course = student[7];
@@ -106,45 +314,265 @@ fs.createReadStream(path.join(__dirname, 'studentList2.csv'))
       classroom.allStudents = allStudents;
       classrooms.push(classroom);
     });
-      
+    
     // Check for remaining students
     let remainingStudents = 0;
-    const tempQueues = {};
     Object.keys(queues).forEach(course => {
-      tempQueues[course] = [...queues[course]];
-      remainingStudents += tempQueues[course].length;
+      remainingStudents += queues[course].length;
     });
-
+    console.log(`Remaining students: ${remainingStudents}`);
+    
+    // If there are remaining students, calculate how many additional halls needed
     if (remainingStudents > 0) {
-      const lastConfig = classroomConfigs[classroomConfigs.length - 1];
-      let additionalClassrooms = 0;
-
+      // Create a deep copy of the queues to simulate additional hall allocation
+      const tempQueues = {};
+      Object.keys(queues).forEach(course => {
+        tempQueues[course] = [...queues[course]];
+      });
+      
+      // Use the last hall configuration as a template for additional halls
+      // If there are no halls selected, use a default configuration
+      const templateHall = selectedHalls.length > 0 ? 
+        selectedHalls[selectedHalls.length - 1] : 
+        { columns: 6, rows: 5 }; // Default if no halls selected
+      
+      let additionalHalls = 0;
+      
+      // Keep generating virtual classrooms until all students are accommodated
       while (true) {
         let allEmpty = true;
+        // Check if any queues still have students
         Object.values(tempQueues).forEach(queue => {
           if (queue.length > 0) allEmpty = false;
         });
-        if (allEmpty) break;
-
-        generateClassroom(lastConfig.columns, lastConfig.rows, slots, tempQueues, numCourses);
-        additionalClassrooms++;
+        
+        if (allEmpty) break; // All students placed, exit loop
+        
+        // Generate a virtual classroom to simulate placing remaining students
+        generateClassroom(templateHall.columns, templateHall.rows, slots, tempQueues, numCourses);
+        additionalHalls++;
       }
-
-      console.log(`\n⚠️ Insufficient classrooms!`);
-      console.log(`▶ Need ${additionalClassrooms} more classroom(s) of ${lastConfig.columns}x${lastConfig.rows}`);
-      console.log(`   to seat ${remainingStudents} remaining student(s) using current distribution logic.`);
+      
+      console.log(`Need ${additionalHalls} more hall(s) of ${templateHall.columns}x${templateHall.rows} to seat ${remainingStudents} remaining students`);
+      
+      return res.status(200).json({ 
+        success: false, 
+        message: 'Insufficient halls for all students',
+        remainingStudents: remainingStudents,
+        additionalHallsNeeded: additionalHalls,
+        hallConfiguration: {
+          rows: templateHall.rows,
+          columns: templateHall.columns
+        },
+        error: `Need ${additionalHalls} more hall(s) of ${templateHall.columns}x${templateHall.rows} to seat ${remainingStudents} remaining students`
+      });
     }
 
-    // Generate HTML
-    const html = generateHTML(classrooms);
-    fs.writeFileSync('seating_arrangement.html', html);
-    console.log('Seating arrangement generated as seating_arrangement.html');
+    // Create a directory for files if it doesn't exist
+    const filesDir = path.join(__dirname, 'generated_files');
+    if (!fs.existsSync(filesDir)) {
+      fs.mkdirSync(filesDir);
+    }
+    
+    // Generate safe filenames
+    const safeName = examName.replace(/[^a-z0-9]/gi, '_').toLowerCase();
+    const timestamp = Date.now();
+    const arrangementFilename = `seating_arrangement_${safeName}_${timestamp}.html`;
+    const rangesFilename = `registration_ranges_${safeName}_${timestamp}.html`;
+    
+    // Generate HTML and save files to the directory
+    const html = generateHTML(classrooms, examName, examDate, req.body.isFN);
+    const filePath = path.join(filesDir, arrangementFilename);
+    fs.writeFileSync(filePath, html);
+    
+    // Generate HTML for registration ranges
+    const rangeHTML = generateRegistrationRangeHTML(classrooms, examName, examDate, req.body.isFN);
+    const rangeFilePath = path.join(filesDir, rangesFilename);
+    fs.writeFileSync(rangeFilePath, rangeHTML);
+    
+    // Return success with download URLs for the files
+    res.status(200).json({ 
+      success: true, 
+      message: 'Seating arrangement generated successfully',
+      remainingStudents: 0,
+      files: {
+        arrangementFile: `/generated_files/${arrangementFilename}`,
+        rangesFile: `/generated_files/${rangesFilename}`
+      }
+    });
+    
+  } catch (error) {
+    console.error('Error generating seating arrangement:', error);
+    res.status(500).json({ success: false, error: 'Internal server error' });
+  }
+});
 
-    // Generate registration range display
-    const rangeHTML = generateRegistrationRangeHTML(classrooms);
-    fs.writeFileSync('registration_ranges.html', rangeHTML);
-    console.log('Registration ranges generated as registration_ranges.html');
-  });
+// On your Express server
+app.post('/download-proxy', async (req, res) => {
+  try {
+    const { fileUrl } = req.body;
+    // Make sure fileUrl is just a path and doesn't contain full URL to prevent security issues
+    const filePath = path.join(__dirname, fileUrl); // Adjust to match your file structure
+    
+    // Set headers to force download
+    res.setHeader('Content-Disposition', 'attachment');
+    res.setHeader('Access-Control-Allow-Origin', 'http://localhost:5173');
+    
+    // Send the file
+    res.sendFile(filePath);
+  } catch (error) {
+    console.error('Error in download proxy:', error);
+    res.status(500).send('Error downloading file');
+  }
+});
+
+app.listen(3000, ()=>{
+  console.log('Server is running on port 3000');
+})
+
+const classrooms = [];
+
+// const classroomConfigs = [
+//   { columns: 6, rows: 5, name: "EC5" },
+//   { columns: 6, rows: 5, name: "EC6" },
+//   { columns: 6, rows: 5, name: "EC7" },
+//   { columns: 6, rows: 5, name: "EC8" },
+//   { columns: 6, rows: 5, name: "EC9" },
+//   { columns: 6, rows: 5, name: "EC10" },
+//   { columns: 6, rows: 5, name: "EC11" },
+//   { columns: 6, rows: 5, name: "EC12" },
+//   { columns: 6, rows: 5, name: "EC13" },
+//   { columns: 6, rows: 5, name: "CS5" },
+//   { columns: 6, rows: 5, name: "CS6" },
+//   { columns: 6, rows: 5, name: "CS7" },
+//   { columns: 6, rows: 5, name: "CS8" },
+//   { columns: 6, rows: 5, name: "CS9" },
+//   { columns: 6, rows: 5, name: "CS10" },
+//   { columns: 6, rows: 5, name: "CS11" },
+//   { columns: 6, rows: 5, name: "CS12" },
+//   { columns: 6, rows: 5, name: "CS13" },
+//   { columns: 6, rows: 5, name: "CS14" },
+//   { columns: 6, rows: 5, name: "CS15" },
+// ];
+
+// // Column labels for the seating arrangement (used internally)
+const columnLabels = ["AL", "AR", "BL", "BR", "CL", "CR"];
+
+// // Read and parse CSV
+// const students = [];
+// fs.createReadStream(path.join(__dirname, 'studentList2.csv'))
+//   .pipe(csv({
+//     headers: false,
+//     skipLines: 1
+//   }))
+//   .on('data', (row) => {
+//     students.push(row);
+//   })
+//   .on('end', () => {
+//     // Group students by course (7th column, index 7)
+//     const groups = {};
+//     students.forEach(student => {
+//       const course = student[7];
+//       if (!groups[course]) {
+//         groups[course] = [];
+//       }
+//       groups[course].push(student);
+//     });
+//     console.log(Object.keys(groups))
+//     const courseNames = Object.keys(groups).sort((a, b) => groups[b].length - groups[a].length);
+//     let numCourses = courseNames.length;
+//     let slots = [];
+//     let numSlots;
+
+//     if (numCourses === 1) {
+//       // For single course, we'll handle this differently in generateClassroom
+//       slots = [courseNames[0]];
+//       numSlots = 1;
+//     } else {
+//       numSlots = Math.ceil(numCourses / 2);
+//       for (let i = 0; i < numSlots; i++) {
+//         const start = i * 2;
+//         const end = start + 2;
+//         slots.push(courseNames.slice(start, end));
+//       }
+//     }
+
+//     // Create queues for each course
+//     const queues = {};
+//     courseNames.forEach(course => {
+//       queues[course] = [...groups[course]];
+//     });
+
+//     // Generate classrooms
+//     classroomConfigs.forEach(config => {
+//       const classroom = generateClassroom(config.columns, config.rows, slots, queues, numCourses);
+//       classroom.name = config.name;
+      
+//       // Count students per course in this classroom
+//       const courseCounts = {};
+      
+//       // Track all students in this classroom with their registration numbers
+//       const allStudents = [];
+      
+//       for (let row = 0; row < config.rows; row++) {
+//         for (let col = 0; col < config.columns; col++) {
+//           const student = classroom.seating[row][col];
+//           if (student) {
+//             const course = student[7];
+//             const regNo = student[1];
+            
+//             courseCounts[course] = (courseCounts[course] || 0) + 1;
+//             allStudents.push({
+//               regNo: regNo,
+//               course: course
+//             });
+//           }
+//         }
+//       }
+      
+//       classroom.courseCounts = courseCounts;
+//       classroom.allStudents = allStudents;
+//       classrooms.push(classroom);
+//     });
+      
+//     // Check for remaining students
+//     let remainingStudents = 0;
+//     const tempQueues = {};
+//     Object.keys(queues).forEach(course => {
+//       tempQueues[course] = [...queues[course]];
+//       remainingStudents += tempQueues[course].length;
+//     });
+
+//     if (remainingStudents > 0) {
+//       const lastConfig = classroomConfigs[classroomConfigs.length - 1];
+//       let additionalClassrooms = 0;
+
+//       while (true) {
+//         let allEmpty = true;
+//         Object.values(tempQueues).forEach(queue => {
+//           if (queue.length > 0) allEmpty = false;
+//         });
+//         if (allEmpty) break;
+
+//         generateClassroom(lastConfig.columns, lastConfig.rows, slots, tempQueues, numCourses);
+//         additionalClassrooms++;
+//       }
+
+//       console.log(`\n⚠️ Insufficient classrooms!`);
+//       console.log(`▶ Need ${additionalClassrooms} more classroom(s) of ${lastConfig.columns}x${lastConfig.rows}`);
+//       console.log(`   to seat ${remainingStudents} remaining student(s) using current distribution logic.`);
+//     }
+
+//     // Generate HTML
+//     const html = generateHTML(classrooms);
+//     fs.writeFileSync('seating_arrangement.html', html);
+//     console.log('Seating arrangement generated as seating_arrangement.html');
+
+//     // Generate registration range display
+//     const rangeHTML = generateRegistrationRangeHTML(classrooms);
+//     fs.writeFileSync('registration_ranges.html', rangeHTML);
+//     console.log('Registration ranges generated as registration_ranges.html');
+//   });
 
 // Replace the generateClassroom function with this improved version
 function generateClassroom(columns, rows, slots, queues, numCourses) {
@@ -390,7 +818,7 @@ function generateClassroom(columns, rows, slots, queues, numCourses) {
   return { seating };
 }
 
-function generateHTML(classrooms) {
+function generateHTML(classrooms, examName, examDate, isFN) {
   const currentDate = new Date();
   const formattedDate = `${currentDate.getDate()}.${currentDate.getMonth() + 1}.${currentDate.getFullYear()} F.N`;
   let html = `<!DOCTYPE html>
@@ -478,11 +906,11 @@ function generateHTML(classrooms) {
     <div class="classroom-container">
       <table>
         <tr class="exam-header">
-          <th colspan="12">B.TECH DEGREE S7(R&S) SEMESTER EXAMINATION NOVEMBER 2024 (2019 SCHEME)</th>
+          <th colspan="12">${examName}</th>
         </tr>
         <tr>
           <th colspan="10">HALL: ${classroom.name}</th>
-          <th colspan="2">Date: ${formattedDate}</th>
+          <th colspan="2">Date: ${examDate} ${isFN == "" ? 'FN': ""}</th>
         </tr>`;
     html += `<tr>`;
     for (let i = 0; i < columnLabels.length; i++) {
@@ -544,7 +972,7 @@ function generateHTML(classrooms) {
 }
 
 
-function generateRegistrationRangeHTML(classrooms) {
+function generateRegistrationRangeHTML(classrooms, examName, examDate, isFN) {
   const currentDate = new Date("2025-03-30");
   const formattedDate = `${currentDate.getDate()}/${currentDate.getMonth() + 1}/${currentDate.getFullYear()} FN`;
   
@@ -692,8 +1120,8 @@ function generateRegistrationRangeHTML(classrooms) {
     <div class="container">
       <div class="header">
         <h2>COLLEGE OF ENGINEERING THALASSERY</h2>
-        <h3>KTU S7(R&S) SEMESTER EXAMINATION, NOV 2024</h3>
-        <p>SEATING ARRANGEMENT FOR: Date: ${formattedDate}</p>
+        <h3>${examName}</h3>
+        <p>SEATING ARRANGEMENT FOR: Date: ${examDate} ${isFN == "" ? 'FN': ""}</p>
       </div>
       
       <table>
