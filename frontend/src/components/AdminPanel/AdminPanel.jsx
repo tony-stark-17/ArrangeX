@@ -4,6 +4,7 @@ import { User } from "@heroui/user";
 import { Icon } from '@iconify-icon/react';
 import { useNavigate } from 'react-router';
 
+import LoadingScreen from '../LoadingScreen';
 import ManageUsers from './ManageUsers';
 import ManageHalls from './ManageHalls';
 import GenerateSeats from './GenerateSeats';
@@ -15,11 +16,14 @@ const AdminPanel = () =>{
     const navigate = useNavigate();
     const [activeTab, setActiveTab] = useState("users");
     const [userDetails, setUserDetails] = useState({})
-
+    const [state, setState] = useState('loading');
     useEffect(() => {
         const userData = JSON.parse(localStorage.getItem('userDetails'));
         if(userData){
             setUserDetails(userData)
+            setTimeout(() => {
+                setState('loaded');
+            }, 1000);
         }else{
             navigate('/login')
         }
@@ -28,6 +32,8 @@ const AdminPanel = () =>{
         setActiveTab(tab);
     };
     return(
+        <>
+        <LoadingScreen state={state} />
        <div className={classes['admin-container']}>
             <nav className={classes['admin-nav']}>
                 <div className={classes['admin-nav-logo']}>
@@ -66,6 +72,7 @@ const AdminPanel = () =>{
                         
             </section>
        </div>
+       </>
     )
 }
 

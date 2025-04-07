@@ -1,8 +1,9 @@
 import axios from "axios";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {Input} from "@heroui/input";
 import { useNavigate } from "react-router";
 import {Button, ButtonGroup} from "@heroui/button";
+import LoadingScreen from '../LoadingScreen';
 import { Icon } from '@iconify-icon/react';
 
 import Logo from '../../assets/logo.png'
@@ -12,12 +13,19 @@ import classes from './AdminLogin.module.css'
 const AdminLogin = () => {
     const navigate = useNavigate();
     const [isVisible, setIsVisible] = useState(false);
+    const [state, setState] = useState('loading');
     const [username, setUsername] = useState('');
     const [password, setPassword] = useState('');
     const toggleVisibility = () => {
         setIsVisible(!isVisible);
         console.log(isVisible);
     };
+
+    useEffect(() => {
+        setTimeout(() => {
+            setState('loaded');
+        }, 1000);
+    }, []);
     const signIn = async () => {
         try{
             const response = await axios.post('http://localhost:3000/adminlogin', {username, password});
@@ -34,6 +42,8 @@ const AdminLogin = () => {
         }
     }
     return(
+        <>
+        <LoadingScreen state={state} />
         <div className={classes['login-container']}>
             <div>
                 <div className={classes['bg-sphere-1']}></div>
@@ -90,6 +100,7 @@ const AdminLogin = () => {
                 </div>
             </div>
         </div>
+        </>
     )
 }
 

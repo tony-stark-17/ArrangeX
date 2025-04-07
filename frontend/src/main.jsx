@@ -13,7 +13,7 @@ import AdminPanel from "./components/AdminPanel";
 const router = createBrowserRouter([
   {
     path: "/",
-    element: <LoadingScreen/>,
+    element: <LoadingScreen state={'loading'}/>,
   },
   {
     path: "/login",
