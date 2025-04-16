@@ -8,6 +8,7 @@ import LoadingScreen from '../LoadingScreen';
 import ManageUsers from './ManageUsers';
 import ManageHalls from './ManageHalls';
 import GenerateSeats from './GenerateSeats';
+import Credits from './Credits';
 
 import Logo from '../../assets/logo.png'
 import classes from './AdminPanel.module.css'
@@ -43,6 +44,7 @@ const AdminPanel = () =>{
                     <Button color="primary" className={`text-white rounded-md ${activeTab == 'users' ? 'bg-teal-700' : 'bg-[#282828]'} justify-start`} onPress={() => handleTabChange('users')}><Icon icon="material-symbols:person" width="24" height="24" />Manage Users</Button>
                     <Button color="primary" className={`text-white rounded-md ${activeTab == 'halls' ? 'bg-teal-700' : 'bg-[#282828]'} justify-start`} onPress={() => handleTabChange('halls')}><Icon icon="bx:chair" width="24" height="24" />Manage Halls</Button>
                     <Button color="primary" className={`text-white rounded-md ${activeTab == 'seats' ? 'bg-teal-700' : 'bg-[#282828]'} justify-start`} onPress={() => handleTabChange('seats')}><Icon icon="mdi:wand" width="24" height="24" />Generate Seats</Button>
+                    <Button color="primary" className={`text-white rounded-md ${activeTab == 'credits' ? 'bg-teal-700' : 'bg-[#282828]'} justify-start`} onPress={() => handleTabChange('credits')}><Icon icon="mdi:account-group" width="24" height="24" />About Us</Button>
                 </div>
                 <div className={classes['admin-nav-user']}>
                     <User
@@ -66,7 +68,8 @@ const AdminPanel = () =>{
                             {
                                 users: <ManageUsers/>,
                                 halls: <ManageHalls/>,
-                                seats: <GenerateSeats/>
+                                seats: <GenerateSeats/>,
+                                credits: <Credits/>,
                             }[activeTab]
                         }
                         

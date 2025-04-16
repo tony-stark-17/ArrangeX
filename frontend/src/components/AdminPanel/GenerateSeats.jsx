@@ -19,7 +19,8 @@ const GenerateSeats = () => {
     const fetchHalls = async () => {
         try {
             const response = await axios.get(`http://localhost:3000/halls`);
-            setHalls(response.data);
+            let hallData = response.data.sort((a, b) => a.name.localeCompare(b.name));
+            setHalls(hallData);
         } catch (error) {
             console.error("Error fetching halls:", error);
         }
@@ -88,10 +89,12 @@ const GenerateSeats = () => {
                 // Extract file names from paths for better download naming
                 const arrangementFileName = response.data.files.arrangementFile.split('/').pop();
                 const rangesFileName = response.data.files.rangesFile.split('/').pop();
+                const countFileName = response.data.files.countFile.split('/').pop();
                 
                 // Download the arrangement file
                 downloadFile(`${baseUrl}${response.data.files.arrangementFile}`, arrangementFileName);
                 downloadFile(`${baseUrl}${response.data.files.rangesFile}`, rangesFileName);
+                downloadFile(`${baseUrl}${response.data.files.countFile}`, countFileName);
             } else {
                 // Handle case where API returns success=false
                 alert(`Error: ${response.data.error}.`);

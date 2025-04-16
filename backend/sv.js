@@ -221,7 +221,9 @@ app.post('/generate-seats', upload.single('studentList'), async (req, res) => {
           skipLines: 1
         }))
         .on('data', (row) => {
-          students.push(row);
+          if(row[0] !== ''){
+            students.push(row);
+          }
         })
         .on('end', () => {
           resolve();
@@ -300,7 +302,6 @@ app.post('/generate-seats', upload.single('studentList'), async (req, res) => {
           if (student) {
             const course = student[7];
             const regNo = student[1];
-            
             courseCounts[course] = (courseCounts[course] || 0) + 1;
             allStudents.push({
               regNo: regNo,
@@ -309,7 +310,6 @@ app.post('/generate-seats', upload.single('studentList'), async (req, res) => {
           }
         }
       }
-      
       classroom.courseCounts = courseCounts;
       classroom.allStudents = allStudents;
       classrooms.push(classroom);
@@ -389,6 +389,12 @@ app.post('/generate-seats', upload.single('studentList'), async (req, res) => {
     const rangeHTML = generateRegistrationRangeHTML(classrooms, examName, examDate, req.body.isFN);
     const rangeFilePath = path.join(filesDir, rangesFilename);
     fs.writeFileSync(rangeFilePath, rangeHTML);
+
+    // Generate HTML for course counts
+    const countFilename = `course_counts_${safeName}_${timestamp}.html`;
+    const countHTML = generateCourseCountHTML(classrooms, examName, examDate, req.body.isFN);
+    const countFilePath = path.join(filesDir, countFilename);
+    fs.writeFileSync(countFilePath, countHTML);
     
     // Return success with download URLs for the files
     res.status(200).json({ 
@@ -397,7 +403,8 @@ app.post('/generate-seats', upload.single('studentList'), async (req, res) => {
       remainingStudents: 0,
       files: {
         arrangementFile: `/generated_files/${arrangementFilename}`,
-        rangesFile: `/generated_files/${rangesFilename}`
+        rangesFile: `/generated_files/${rangesFilename}`,
+        countFile: `/generated_files/${countFilename}`
       }
     });
     
@@ -962,6 +969,13 @@ function generateHTML(classrooms, examName, examDate, isFN) {
       </tr>`;
     }
     html += `
+      <tr>
+        <td colspan="12" style="font-weight: bold; text-align: center; font-size: 18px;">
+          DEVELOPED BY STUDENTS OF IT DEPARTMENT, (2022-26 BATCH)
+        </td>
+      </tr>
+    `;
+    html += `
       </table>
     </div>`;
   });
@@ -1122,6 +1136,7 @@ function generateRegistrationRangeHTML(classrooms, examName, examDate, isFN) {
         <h2>COLLEGE OF ENGINEERING THALASSERY</h2>
         <h3>${examName}</h3>
         <p>SEATING ARRANGEMENT FOR: Date: ${examDate} ${isFN == "" ? 'FN': ""}</p>
+        <p><b>DEVELOPED BY STUDENTS OF IT DEPARTMENT (2022-2026) BATCH</b></p>
       </div>
       
       <table>
@@ -1158,6 +1173,154 @@ function generateRegistrationRangeHTML(classrooms, examName, examDate, isFN) {
         <p>NB:- Please enter the examination Hall before 9.30 A.M</p>
         <p>Mobile phones are not permitted in Examination Hall</p>
       </div>
+    </div>
+  </body>
+  </html>`;
+  
+  return html;
+}
+
+function generateCourseCountHTML(classrooms, examName, examDate, isFN) {
+  // Get all unique course codes across all classrooms
+  const allCourses = new Set();
+  classrooms.forEach(classroom => {
+    Object.keys(classroom.courseCounts || {}).forEach(course => {
+      // Extract course code from course name
+      const codeMatch = course.match(/\(\s*([A-Z]{2,3}\d{3})\s*\)/);
+      const courseCode = codeMatch && codeMatch[1] ? codeMatch[1] : course;
+      allCourses.add(courseCode);
+    });
+  });
+  
+  // Convert to array and sort alphabetically
+  const coursesList = Array.from(allCourses).sort();
+  
+  // Function to extract course code from course name
+  function extractCourseCode(courseName) {
+    const codeMatch = courseName.match(/\(\s*([A-Z]{2,3}\d{3})\s*\)/);
+    return codeMatch && codeMatch[1] ? codeMatch[1] : courseName;
+  }
+  
+  // Calculate total student count for each course
+  const courseTotals = {};
+  coursesList.forEach(course => {
+    courseTotals[course] = 0;
+  });
+  
+  // Count total students for each hall
+  const hallTotals = {};
+  classrooms.forEach(classroom => {
+    hallTotals[classroom.name] = 0;
+    Object.entries(classroom.courseCounts || {}).forEach(([course, count]) => {
+      const courseCode = extractCourseCode(course);
+      courseTotals[courseCode] += count;
+      hallTotals[classroom.name] += count;
+    });
+  });
+  
+  // Calculate grand total
+  const grandTotal = Object.values(hallTotals).reduce((sum, count) => sum + count, 0);
+  
+  let html = `<!DOCTYPE html>
+  <html>
+  <head>
+    <style>
+      body { 
+        font-family: Arial, sans-serif; 
+        margin: 0;
+        padding: 20px;
+      }
+      .container {
+        max-width: 1200px;
+        margin: 0 auto;
+      }
+      h2, h3 {
+        text-align: center;
+        margin: 10px 0;
+      }
+      table { 
+        border-collapse: collapse; 
+        width: 100%; 
+        margin-bottom: 20px;
+      }
+      th, td { 
+        border: 1px solid black; 
+        padding: 8px;
+        text-align: center;
+      }
+      th { 
+        background-color: #f2f2f2; 
+        font-weight: bold;
+      }
+      .hall-cell {
+        font-weight: bold;
+        text-align: left;
+      }
+      .total-row td, .total-col {
+        font-weight: bold;
+        background-color: #e6e6e6;
+      }
+      .total-value {
+        font-weight: bold;
+      }
+      @media print {
+        @page {
+          size: landscape;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <h2>QN PAPER PRINT COUNT</h2>
+      <div>Date: ${examDate}</div>
+      <div>Exam: ${examName}</div>
+      <div>Total count of students: ${grandTotal}</div>
+      
+      <table>
+        <tr>
+          <th>Halls</th>`;
+  
+  // Add course headers
+  coursesList.forEach(course => {
+    html += `<th>${course}</th>`;
+  });
+  
+  html += `<th>Total</th></tr>`;
+  
+  // Add classroom rows
+  classrooms.forEach((classroom, index) => {
+    html += `<tr>
+      <td class="hall-cell">${classroom.name}</td>`;
+    
+    // Add count for each course in this classroom
+    coursesList.forEach(courseCode => {
+      let count = 0;
+      // Find matching course in this classroom
+      Object.entries(classroom.courseCounts || {}).forEach(([course, studentCount]) => {
+        if (extractCourseCode(course) === courseCode) {
+          count = studentCount;
+        }
+      });
+      html += `<td>${count > 0 ? count : ''}</td>`;
+    });
+    
+    // Add row total
+    html += `<td class="total-col">${hallTotals[classroom.name]}</td></tr>`;
+  });
+  
+  // Add totals row
+  html += `<tr class="total-row">
+    <td>Total</td>`;
+  
+  coursesList.forEach(course => {
+    html += `<td>${courseTotals[course]}</td>`;
+  });
+  
+  html += `<td class="total-value">${grandTotal}</td></tr>`;
+  
+  html += `
+      </table>
     </div>
   </body>
   </html>`;
